@@ -1,0 +1,55 @@
+name: Lost Ark Gem Snapshot
+
+on:
+  schedule:
+    # Every day 21:17 KST (12:17 UTC). Schedule may run late.
+    - cron: '17 12 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lostark-gem-snapshot
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run offline tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Collect gem prices
+        env:
+          LOSTARK_API_KEY: ${{ secrets.LOSTARK_API_KEY }}
+          STOP_AFTER_KST: '2026-11-15'
+        run: python collect.py
+
+      - name: Save results to repository
+        shell: bash
+        run: |
+          if [ ! -f data/gems.csv ]; then
+            echo 'No data file: collection ended or no new data.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/gems.csv data/latest.md
+          if git diff --cached --quiet; then
+            echo 'No new data to commit.'
+            exit 0
+          fi
+          git commit -m 'data: update Lost Ark gem snapshots'
+          git push
