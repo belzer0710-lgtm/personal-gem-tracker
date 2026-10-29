@@ -2,8 +2,8 @@ name: Lost Ark Gem Snapshot
 
 on:
   schedule:
-    # Every day 21:17 KST (12:17 UTC). Schedule may run late.
-    - cron: '17 12 * * *'
+    - cron: '17 21 * * *'
+      timezone: 'Asia/Seoul'
   workflow_dispatch:
 
 permissions:
