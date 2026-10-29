@@ -22,6 +22,8 @@ KST = ZoneInfo("Asia/Seoul")
 CSV_PATH = Path(__file__).resolve().parent / "data" / "gems.csv"
 REPORT_URL = "https://github.com/belzer0710-lgtm/personal-gem-tracker/blob/main/data/latest.md"
 EXPECTED_KEYS = {(str(lv), kind) for lv in (8, 9, 10) for kind in ("겁화", "작열")}
+MAX_BASELINE_DEVIATION = timedelta(minutes=90)
+MODES = {"full", "alert_only"}
 
 
 def as_timestamp(value: str) -> datetime:
@@ -121,9 +123,54 @@ def calculate_synthesis(current: list[dict]) -> dict:
     return {"options": options, "cheapest": cheapest}
 
 
+def near_24h_reference(rows: list[dict], sample_time: datetime) -> dict | None:
+    """Return a real price observation nearest ~24h before sample_time.
+
+    A 3-hour snapshot can be late or missed; never invent an exact-day price.
+    Reject a reference more than 90 min from the intended 24h timestamp.
+    """
+    target = sample_time - timedelta(hours=24)
+    candidates = [
+        row for row in rows
+        if row["_time"] < sample_time
+        and abs(row["_time"] - target) <= MAX_BASELINE_DEVIATION
+        and valid_price(row.get("min_buy_gold")) is not None
+    ]
+    return min(candidates, key=lambda row: abs(row["_time"] - target)) if candidates else None
+
+
+def percent_change_24h(row: dict, by_gem: dict) -> tuple[float | None, dict | None]:
+    key = (row["level"], row["kind"])
+    earlier = near_24h_reference(by_gem[key], row["_time"])
+    if earlier is None:
+        return None, None
+    return percent_change(row.get("min_buy_gold"), earlier.get("min_buy_gold")), earlier
+
+
+def drop_events(latest_time: datetime, current: list[dict],
+                previous: dict[tuple[str, str], dict], by_gem: dict,
+                threshold: float) -> list[dict]:
+    """Only alert when the approx-24h drop FIRST crosses the threshold.
+
+    In the six intermediate collection runs this avoids repeating the same
+    -5% warning every 3 hours. Regular full reports still show all drops.
+    """
+    events = []
+    for row in sorted(current, key=lambda r: (int(r["level"]), r["kind"])):
+        current_change, baseline = percent_change_24h(row, by_gem)
+        if current_change is None or current_change > -threshold:
+            continue
+        prior = previous.get((row["level"], row["kind"]))
+        prior_change = percent_change_24h(prior, by_gem)[0] if prior is not None else None
+        if prior_change is None or prior_change > -threshold:
+            events.append({"row": row, "pct": current_change, "baseline": baseline})
+    return events
+
+
 def format_payload(latest_time: datetime, current: list[dict],
                    previous: dict[tuple[str, str], dict], by_gem: dict,
                    threshold: float = 5.0) -> dict:
+    """Full report used at 09:17/21:17 scheduled runs and manual tests."""
     fields = []
     alerts = []
     for row in sorted(current, key=lambda r: (int(r["level"]), 0 if r["kind"] == "겁화" else 1)):
@@ -132,6 +179,8 @@ def format_payload(latest_time: datetime, current: list[dict],
         price = valid_price(row["min_buy_gold"])
         change = percent_change(price, old.get("min_buy_gold"))
         change_label = f"{change:+.2f}%" if change is not None else "비교자료 없음"
+        change_24h, baseline = percent_change_24h(row, by_gem)
+        label_24h = f"{change_24h:+.2f}%" if change_24h is not None else "자료 부족"
         count = int(row["total_listings"])
         count_change = (
             f"{count - int(old['total_listings']):+,}건"
@@ -142,14 +191,14 @@ def format_payload(latest_time: datetime, current: list[dict],
         fields.append({
             "name": f"{row['level']}레벨 {row['kind']}",
             "value": (
-                f"최저 **{gold_text(price) if price is not None else '매물 없음'}** (직전 {change_label})\n"
+                f"최저 **{gold_text(price) if price is not None else '매물 없음'}** (직전 {change_label} / 약24h {label_24h})\n"
                 f"3일 평균 **{gold_text(avg3)}** | 7일 평균 **{gold_text(avg7)}**\n"
                 f"등록 **{count:,}건** (직전 {count_change})"
             ),
             "inline": False,
         })
-        if change is not None and change <= -threshold:
-            alerts.append(f"{row['level']}{'겁' if row['kind']=='겁화' else '작'} {change:+.2f}%")
+        if change_24h is not None and change_24h <= -threshold:
+            alerts.append(f"{row['level']}{'겁' if row['kind']=='겁화' else '작'} {change_24h:+.2f}%")
 
     costs = calculate_synthesis(current)
     cost_rows = [f"{name}: **{gold_text(value)}**" for name, value in costs["options"]]
@@ -158,12 +207,12 @@ def format_payload(latest_time: datetime, current: list[dict],
     cost_rows.append("※ 겁화·작열 중 낮은 최저호가 사용, 합성 결과 종류는 보장 안 됨")
     fields.append({"name": "10레벨 1개 확보 비용 비교", "value": "\n".join(cost_rows), "inline": False})
 
-    content = "🚨 **급락 감지 (직전 수집 대비)**: " + ", ".join(alerts) if alerts else ""
+    content = "🚨 **약 24시간 급락 기준 도달**: " + ", ".join(alerts) if alerts else ""
     description = (
         f"수집: **{latest_time:%Y-%m-%d %H:%M} KST**\n"
-        f"하락 알림 기준: 직전 대비 **-{threshold:g}% 이하**\n"
-        f"평균: 한국 날짜 기준 최근 3일·7일의 일별 평균을 다시 평균\n"
-        f"[GitHub 기존 최신 보고서]({REPORT_URL})"
+        f"경고 기준: 약 24시간 전 대비 **-{threshold:g}% 이하** (최대 ±90분 오차 허용)\n"
+        f"3일·7일 평균: 한국 날짜별 평균 후 재평균\n"
+        f"[GitHub 최신 보고서]({REPORT_URL})"
     )
     return {
         "username": "로아 보석 시세",
@@ -173,7 +222,33 @@ def format_payload(latest_time: datetime, current: list[dict],
             "title": "로스트아크 4티어 보석 시세 · 무료 분석",
             "description": description,
             "fields": fields,
-            "footer": {"text": "호가·등록 건수 스냅샷. 체결가·거래량 아님. 날짜별 기록 부족 시 평균 미표시"},
+            "footer": {"text": "현재 등록된 호가·건수, 체결가·거래량 아님. 날짜별 기록 부족 시 평균 미표시"},
+        }],
+    }
+
+
+def format_alert_payload(latest_time: datetime, events: list[dict], threshold: float) -> dict:
+    """Send only *new* 24h drop events in intermediate 3-hour runs."""
+    lines = []
+    for event in events:
+        row, baseline, pct = event["row"], event["baseline"], event["pct"]
+        baseline_time = baseline["_time"].strftime("%m/%d %H:%M")
+        lines.append(
+            f"**{row['level']}레벨 {row['kind']}**: {pct:+.2f}%\n"
+            f"{gold_text(valid_price(baseline['min_buy_gold']))} ({baseline_time}) → "
+            f"{gold_text(valid_price(row['min_buy_gold']))}"
+        )
+    return {
+        "username": "로아 보석 급락 알림",
+        "allowed_mentions": {"parse": []},
+        "embeds": [{
+            "title": f"🚨 신규 급락 감지 (약 24시간 -{threshold:g}% 이하)",
+            "description": (
+                f"수집: **{latest_time:%Y-%m-%d %H:%M} KST**\n\n"
+                + "\n\n".join(lines)
+                + "\n\n기준을 새로 넘었을 때 1회 알림. 체결가가 아닌 최저 호가 기준."
+            ),
+            "footer": {"text": "최신 시세 스냅샷 / 지난 약 24시간의 근사 비교"},
         }],
     }
 
@@ -200,19 +275,34 @@ def send_webhook(url: str, payload: dict) -> None:
         raise RuntimeError("Discord 서버 연결 실패") from None
 
 
+def now_kst() -> datetime:
+    return datetime.now(KST)
+
+
 def main() -> None:
+    mode = os.getenv("DISCORD_REPORT_MODE", "full").strip().lower()
+    if mode not in MODES:
+        raise ValueError("DISCORD_REPORT_MODE는 full 또는 alert_only여야 해.")
+    latest_time, current, previous, by_gem = load_data(CSV_PATH)
+    age_seconds = (now_kst() - latest_time).total_seconds()
+    # After the original stop date, do not report a stale snapshot.
+    if age_seconds < -60 or age_seconds > 2 * 60 * 60:
+        print("이번 실행에서 수집한 새 데이터가 없어. Discord 전송을 생략해.")
+        return
+    threshold = get_threshold()
+    if mode == "full":
+        payload = format_payload(latest_time, current, previous, by_gem, threshold)
+    else:
+        events = drop_events(latest_time, current, previous, by_gem, threshold)
+        if not events:
+            print("이번 중간 수집에서는 새 24시간 급락이 없어서 디스코드 알림을 생략해.")
+            return
+        payload = format_alert_payload(latest_time, events, threshold)
     webhook = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
     if not webhook:
         raise RuntimeError("GitHub Secret DISCORD_WEBHOOK_URL이 없어.")
-    latest_time, current, previous, by_gem = load_data(CSV_PATH)
-    age_seconds = (datetime.now(KST) - latest_time).total_seconds()
-    # When collect.py stops after Nov 15, never send an older snapshot again.
-    if age_seconds < -60 or age_seconds > 2 * 60 * 60:
-        print("최신 기록이 이번 실행에서 생성되지 않았어. Discord 전송을 생략해.")
-        return
-    payload = format_payload(latest_time, current, previous, by_gem, get_threshold())
     send_webhook(webhook, payload)
-    print("Discord 보석 시세·3/7일 평균·합성비 보고서 전송 완료")
+    print(f"Discord 전송 완료 (mode={mode})")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,10 @@ name: Lost Ark Gem Snapshot
 
 on:
   schedule:
+    # 여섯 번은 수집만 하며, 지난 24시간에 신규 급락이 감지될 때만 알림
+    - cron: '17 0,3,6,12,15,18 * * *'
+      timezone: 'Asia/Seoul'
+    # 오전/오후 9:17에는 가격/매물/평균/합성비 전체 보고서
     - cron: '17 9,21 * * *'
       timezone: 'Asia/Seoul'
   workflow_dispatch:
@@ -54,8 +58,9 @@ jobs:
           git commit -m 'data: update Lost Ark gem snapshots'
           git push
 
-      - name: Send Discord price report with free analytics
+      - name: Send scheduled Discord report or new drop alert
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          PRICE_DROP_ALERT_PCT: '5'   # 직전 수집 대비 5% 이상 하락하면 알림. 바꾸려면 숫자만 수정
+          PRICE_DROP_ALERT_PCT: '5'
+          DISCORD_REPORT_MODE: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '17 9,21 * * *') && 'full' || 'alert_only' }}
         run: python discord_notify.py
