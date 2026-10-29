@@ -1,10 +1,12 @@
 name: Lost Ark Gem Snapshot
 
+
 on:
   schedule:
-    - cron: '17 21 * * *'
+    - cron: '17 9,21 * * *'
       timezone: 'Asia/Seoul'
   workflow_dispatch:
+
 
 permissions:
   contents: write
