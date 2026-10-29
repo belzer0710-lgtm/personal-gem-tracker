@@ -1,12 +1,11 @@
 name: Lost Ark Gem Snapshot
 
-
 on:
   schedule:
+    # Twice daily at 09:17 and 21:17 KST (runs may be delayed).
     - cron: '17 9,21 * * *'
       timezone: 'Asia/Seoul'
   workflow_dispatch:
-
 
 permissions:
   contents: write
@@ -55,3 +54,8 @@ jobs:
           fi
           git commit -m 'data: update Lost Ark gem snapshots'
           git push
+
+      - name: Send Discord price report
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python discord_notify.py
