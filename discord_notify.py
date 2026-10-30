@@ -271,7 +271,7 @@ def format_price_payload(latest_time: datetime, current: list[dict],
         "allowed_mentions": {"parse": []},
         **({"content": content} if content else {}),
         "embeds": [{
-            "title": "로스트아크 4티어 보석 · 3시간 가격 알림",
+            "title": "로스트아크 4티어 보석 · 1시간 가격 알림",
             "description": (
                 f"수집: **{latest_time:%Y-%m-%d %H:%M} KST**\n"
                 f"직전 수집 대비 변화 · 약 24시간 -{threshold:g}% 신규 급락만 강조\n"
