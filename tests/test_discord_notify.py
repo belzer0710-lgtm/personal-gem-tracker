@@ -129,7 +129,7 @@ class PriceDiscordTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 dn.get_threshold()
 
-    def test_three_hour_price_update_contains_all_six_gems(self):
+    def def test_hourly_price_update_contains_all_six_gems(self):
         td, (latest, current, prev, by_gem) = analyze(fixture_rows(days=7))
         with td:
             result = dn.format_price_payload(latest, current, prev, by_gem, 5)
