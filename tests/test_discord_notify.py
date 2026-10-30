@@ -135,7 +135,7 @@ class PriceDiscordTests(unittest.TestCase):
             result = dn.format_price_payload(latest, current, prev, by_gem, 5)
             embed = result["embeds"][0]
             self.assertEqual(len(embed["fields"]), 6)
-            self.assertIn("3시간 가격 알림", embed["title"])
+            self.assertIn("1시간 가격 알림", embed["title"])
             self.assertIn("2,700,000 G", embed["fields"][-2]["value"])
             self.assertIn("직전 +0.00%", embed["fields"][-2]["value"])
             self.assertIn("등록 **206건** (직전 +0건)", embed["fields"][-2]["value"])
