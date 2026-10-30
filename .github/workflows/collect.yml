@@ -1,19 +1,19 @@
 name: Lost Ark Gem Snapshot
 
 
+
 on:
-  schedule:
-    # 매시간 17분에 간단 가격 알림 (09시, 21시 제외)
-    - cron: '17 0-8,10-20,22-23 * * *'
-      timezone: 'Asia/Seoul'
-
-    # 오전 9:17, 오후 9:17 상세 분석 보고서
-    - cron: '17 9,21 * * *'
-      timezone: 'Asia/Seoul'
-
   workflow_dispatch:
+    inputs:
+      report_mode:
+        description: '디스코드 보고 종류'
+        required: true
+        type: choice
+        default: price
+        options:
+          - price
+          - full
 
-permissions:
   contents: write
 
 concurrency:
@@ -65,5 +65,6 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           PRICE_DROP_ALERT_PCT: '5'
-          DISCORD_REPORT_MODE: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '17 9,21 * * *') && 'full' || 'price' }}
+          DISCORD_REPORT_MODE: ${{ inputs.report_mode }}
+
         run: python discord_notify.py
