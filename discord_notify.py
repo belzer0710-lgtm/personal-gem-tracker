@@ -153,7 +153,7 @@ def drop_events(latest_time: datetime, current: list[dict],
     """Only alert when the approx-24h drop FIRST crosses the threshold.
 
     In the six intermediate collection runs this avoids repeating the same
-    -5% warning every hour. Regular full reports still show all drops.
+    -5% warning every 3 hours. Regular full reports still show all drops.
     """
     events = []
     for row in sorted(current, key=lambda r: (int(r["level"]), r["kind"])):
@@ -231,9 +231,9 @@ def format_payload(latest_time: datetime, current: list[dict],
 def format_price_payload(latest_time: datetime, current: list[dict],
                          previous: dict[tuple[str, str], dict],
                          by_gem: dict, threshold: float = 5.0) -> dict:
-    """Compact hourly price update (22 hours per day).
+    """Compact price update on six intermediate 3-hour runs.
 
-    The 09:17/21:17 runs use the full report instead to avoid duplicate
+    The two 09:17/21:17 runs use the full report instead to avoid duplicate
     notifications. Price, listing counts and previous-snapshot changes are
     included for every gem; the warning is added only on a NEW 24h threshold
     crossing.
@@ -271,7 +271,7 @@ def format_price_payload(latest_time: datetime, current: list[dict],
         "allowed_mentions": {"parse": []},
         **({"content": content} if content else {}),
         "embeds": [{
-            "title": "로스트아크 4티어 보석 · 1시간 가격 알림",
+            "title": "로스트아크 4티어 보석 · 3시간 가격 알림",
             "description": (
                 f"수집: **{latest_time:%Y-%m-%d %H:%M} KST**\n"
                 f"직전 수집 대비 변화 · 약 24시간 -{threshold:g}% 신규 급락만 강조\n"
@@ -284,7 +284,7 @@ def format_price_payload(latest_time: datetime, current: list[dict],
 
 
 def format_alert_payload(latest_time: datetime, events: list[dict], threshold: float) -> dict:
-    """Send only *new* 24h drop events in non-full hourly runs."""
+    """Send only *new* 24h drop events in intermediate 3-hour runs."""
     lines = []
     for event in events:
         row, baseline, pct = event["row"], event["baseline"], event["pct"]

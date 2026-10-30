@@ -1,47 +1,45 @@
-로스트아크 보석 시세 3시간 수집 + 디스코드 알림 패치
-====================================================
-대상 GitHub 저장소: belzer0710-lgtm/personal-gem-tracker
+로스트아크 보석 추적기: 3시간마다 간단 가격 알림 + 하루 2회 전체 보고서
+=================================================================
+대상 저장소: https://github.com/belzer0710-lgtm/personal-gem-tracker
 
-예약 수집 시각 (한국시간):
-00:17 / 03:17 / 06:17 / 09:17 / 12:17 / 15:17 / 18:17 / 21:17
-* GitHub Actions 예약 실행은 늦어지거나 드물게 누락될 수 있음.
-* 가격/매물 CSV 누적: 매 실행 (하루 최대 8회)
-* 정기 디스코드 전체 보고: 09:17, 21:17 예약 실행 + 수동 실행 시
-* 나머지 6회: 직전 약 24시간 대비 가격 하락폭이 처음 -5% 이하로 진입한 경우에만 디스코드 급락 알림
-* 중복 경고 방지: 같은 -5% 구간에 머무는 동안 추가 급락 알림은 반복하지 않음.
-* 과거 기록이 없거나 정확한 24시간 부근 기록이 없으면 경고하지 않음.
-* 조회 시점 24시간 전 데이터에서 최대 90분 차이가 나는 값까지만 비교.
-* 3일/7일 평균: 기존 방식 그대로 한국 날짜별 일평균을 계산한 뒤 평균. 날짜가 빠지면 자료 부족.
-* 기존 11월 15일 수집 종료일 유지.
+한국시간 예약:
+- 00:17 / 03:17 / 06:17 / 12:17 / 15:17 / 18:17
+  -> 보석 6종 가격, 직전 대비 변동률, 등록 매물과 증감량을 담은 간단 디스코드 가격 알림 (1회)
+- 09:17 / 21:17
+  -> 위 가격·매물 정보를 포함해 3일/7일 평균, 24시간 변화, 합성 비용까지 담은 전체 보고서 (1회)
+- 수동 Run workflow
+  -> 전체 보고서 (테스트용)
 
-압축 파일에서 복사할 파일 (3개만):
-- discord_notify.py                    기존 파일 덮어쓰기
-- .github/workflows/collect.yml       기존 파일 덮어쓰기
-- tests/test_discord_notify.py        기존 파일 덮어쓰기 또는 새로 추가
+=> 총 8회 수집, 총 8개의 정기 디스코드 메시지 (간단 6회 + 전체 2회).
+=> 약 24시간 전보다 가격이 -5% 이하로 처음 떨어지면 간단 알림에도 급락 경고 강조.
+=> GitHub Actions 예약 실행은 지연되거나 누락될 수 있음.
 
-절대 삭제/덮어쓰지 않을 것:
-- collect.py
-- data/gems.csv
-- data/latest.md
-- 기존 GitHub Secrets LOSTARK_API_KEY 및 DISCORD_WEBHOOK_URL
+교체/추가할 파일 3개:
+1. discord_notify.py                 -> 기존 파일 덮어쓰기
+2. .github/workflows/collect.yml    -> 기존 파일 덮어쓰기
+3. tests/test_discord_notify.py     -> 기존 파일 덮어쓰기/없으면 추가
 
-설치:
-1. GitHub Desktop에서 personal-gem-tracker 열기 → Fetch origin / Pull origin (필요할 때).
-2. Show in Explorer로 복제 폴더 열기.
-3. ZIP을 풀어 위 3개 파일을 같은 경로에 붙여넣기(기존 파일 덮어쓰기).
-4. Changes에서 collect.yml, discord_notify.py, test_discord_notify.py 확인.
-5. Summary: Collect every 3 hours + smart Discord alerts
-6. Commit to main → Push origin.
-7. GitHub Actions → Lost Ark Gem Snapshot → Run workflow → 초록 체크 확인.
-8. 수동 실행은 테스트 편의를 위해 전체 보고서를 1회 전송하도록 설정되어 있음.
-9. 다음 예약 3시간 수집부터 CSV에 6행씩 추가되는지 확인. 09/21시에는 전체 보고서가 자동으로 도착함.
+절대 덮어쓰거나 삭제하지 않을 파일:
+- collect.py (기존 공식 API 수집기)
+- data/gems.csv (누적 시세 원본)
+- data/latest.md (최신 보석 보고서)
+- GitHub Secrets LOSTARK_API_KEY / DISCORD_WEBHOOK_URL
 
-알림 기준을 바꾸려면:
-.github/workflows/collect.yml 내 'PRICE_DROP_ALERT_PCT: \'5\'' 숫자를 변경.
+GitHub Desktop 설치 단계:
+1. 저장소 personal-gem-tracker 선택.
+2. Fetch origin -> Pull origin(필요할 경우)으로 최신 내용 내려받기.
+3. Show in Explorer로 저장소 폴더 열기.
+4. ZIP 내 파일 3개를 해당 경로에 붙여넣기, 기존 파일 덮어쓰기.
+5. Changes에서 수정파일을 확인하고 Summary: Price updates every 3h + reports twice daily
+6. Commit to main -> Push origin.
+7. GitHub Actions > Lost Ark Gem Snapshot > Run workflow. 초록 체크와 디스코드 전체 보고 확인.
+8. 다음 예약 실행에서는 간단 알림 또는 전체 보고가 도착하는지 확인.
 
-주의:
-- 이번 ZIP에 OpenAI API 비용/키/연동 없음.
-- 현재 등록된 매물 건수는 실제 거래량/체결량이 아님.
-- 실제 현금 거래가는 수집 대상 아님.
-- 가격이 -5% 이하로 유지되면 다음 3시간 수집 때 같은 경고가 반복되지 않음.
-- 소스/ZIP에 API 키나 디스코드 웹훅 주소를 직접 넣지 말 것.
+휴대폰으로 직접 수정할 경우:
+- GitHub 웹사이트에서 .github/workflows/collect.yml 의
+  DISCORD_REPORT_MODE 조건식에서 끝의 'alert_only' 를 'price' 로 바꿈.
+- 단, 전체 변경 기능(간단 가격 메시지 포함)을 쓰려면 discord_notify.py도 이 ZIP 버전으로 교체해야 함.
+
+비용: 별도 OpenAI API 호출 없음. GitHub Actions 무료 한도 및 API 이용 조건 적용.
+보석 매물 건수는 현재 등록 건수이지 거래 체결량이 아님.
+기존 2026-11-15 수집 종료 설정 유지.

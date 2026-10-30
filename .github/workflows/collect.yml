@@ -1,17 +1,14 @@
 name: Lost Ark Gem Snapshot
 
 on:
-  # cron-job.org에서 hourly price(22회), full(2회) dispatch; 중복 예약 방지
+  schedule:
+    # 중간 6회는 간단 가격 알림 (급락 시 강조)
+    - cron: '17 0,3,6,12,15,18 * * *'
+      timezone: 'Asia/Seoul'
+    # 오전/오후 9:17에는 가격 알림을 포함한 전체 분석 보고서 1회 (중복 전송 방지)
+    - cron: '17 9,21 * * *'
+      timezone: 'Asia/Seoul'
   workflow_dispatch:
-    inputs:
-      report_mode:
-        description: '가격 알림 price(매시간), 상세 보고 full(09:17/21:17)'
-        required: true
-        default: 'price'
-        type: choice
-        options:
-          - full
-          - price
 
 permissions:
   contents: write
@@ -61,9 +58,9 @@ jobs:
           git commit -m 'data: update Lost Ark gem snapshots'
           git push
 
-      - name: Send hourly price update or twice-daily full Discord report
+      - name: Send brief price update or full Discord report
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           PRICE_DROP_ALERT_PCT: '5'
-          DISCORD_REPORT_MODE: ${{ inputs.report_mode }}
+          DISCORD_REPORT_MODE: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '17 9,21 * * *') && 'full' || 'price' }}
         run: python discord_notify.py
