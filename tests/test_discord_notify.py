@@ -129,6 +129,70 @@ class PriceDiscordTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 dn.get_threshold()
 
+    def test_hourly_price_update_contains_all_six_gems(self):
+        td, (latest, current, prev, by_gem) = analyze(fixture_rows(days=7))
+        with td:
+            result = dn.format_price_payload(latest, current, prev, by_gem, 5)
+            embed = result["embeds"][0]
+            self.assertEqual(len(embed["fields"]), 6)
+            self.assertIn("1시간 가격 알림", embed["title"])
+            self.assertIn("2,700,000 G", embed["fields"][-2]["value"])
+            self.assertIn("직전 +0.00%", embed["fields"][-2]["value"])
+            self.assertIn("등록 **206건** (직전 +0건)", embed["fields"][-2]["value"])
+            self.assertNotIn("3일 평균", json.dumps(result, ensure_ascii=False))
+            self.assertNotIn("합성 비용", json.dumps(result, ensure_ascii=False))
+            self.assertNotIn("content", result)
+
+    def test_price_update_includes_new_drop_warning_only_when_crossing(self):
+        def f(d, h, lv, kind, p):
+            return int(p * .94) if d == 6 and h == 21 and lv == 10 and kind == '겁화' else p
+        td, (latest, current, prev, by_gem) = analyze(fixture_rows(special=f))
+        with td:
+            payload = dn.format_price_payload(latest, current, prev, by_gem, 5)
+            self.assertIn('10겁 -6.00%', payload['content'])
+            self.assertEqual(len(payload['embeds'][0]['fields']), 6)
+
+    def test_hourly_snapshots_compare_with_previous_hour_and_24h(self):
+        start = datetime(2026, 11, 1, 0, 17, tzinfo=KST)
+        rows = []
+        for hour in range(26):
+            t = start + timedelta(hours=hour)
+            for level in (8, 9, 10):
+                for kind in ('겁화', '작열'):
+                    price = 1000000 if hour < 25 else 970000
+                    rows.append({
+                        'timestamp_kst':t.strftime('%Y-%m-%d %H:%M:%S%z'),
+                        'date_kst':t.strftime('%Y-%m-%d'),
+                        'level':str(level), 'kind':kind,
+                        'item_name':f'{level}레벨 {kind}의 보석',
+                        'min_buy_gold':str(price), 'total_listings':'300',
+                        'top3_median_gold':str(price), 'sampled_listings':'10',
+                    })
+        td, (latest, current, prev, by_gem) = analyze(rows)
+        with td:
+            self.assertEqual(latest.hour, 1)
+            first = next(r for r in current if r['level']=='10' and r['kind']=='겁화')
+            self.assertAlmostEqual(dn.percent_change(first['min_buy_gold'], prev[('10','겁화')]['min_buy_gold']), -3)
+            day_change, baseline = dn.percent_change_24h(first, by_gem)
+            self.assertAlmostEqual(day_change, -3)
+            self.assertEqual((latest - baseline['_time']).total_seconds(), 86400)
+            compact = dn.format_price_payload(latest, current, prev, by_gem)
+            self.assertIn('직전 -3.00%', compact['embeds'][0]['fields'][-2]['value'])
+
+    def test_price_mode_always_sends_without_a_drop(self):
+        td, data = analyze(fixture_rows(days=7))
+        with td, patch.object(dn, 'CSV_PATH', Path(td.name)/'gems.csv'):
+            latest = data[0]
+            with patch.object(dn, 'now_kst', return_value=latest + timedelta(minutes=2)):
+                with patch.dict(os.environ, {
+                    'DISCORD_REPORT_MODE':'price',
+                    'PRICE_DROP_ALERT_PCT':'5',
+                    'DISCORD_WEBHOOK_URL': 'https://discord.com/api/webhooks/123/secret'
+                }), patch.object(dn, 'send_webhook') as fake_send:
+                    dn.main()
+                    fake_send.assert_called_once()
+                    self.assertEqual(len(fake_send.call_args.args[1]['embeds'][0]['fields']), 6)
+
     def test_main_alert_only_skips_sending_without_drop(self):
         rows = fixture_rows(days=7)
         td, data = analyze(rows)

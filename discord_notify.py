@@ -23,7 +23,7 @@ CSV_PATH = Path(__file__).resolve().parent / "data" / "gems.csv"
 REPORT_URL = "https://github.com/belzer0710-lgtm/personal-gem-tracker/blob/main/data/latest.md"
 EXPECTED_KEYS = {(str(lv), kind) for lv in (8, 9, 10) for kind in ("겁화", "작열")}
 MAX_BASELINE_DEVIATION = timedelta(minutes=90)
-MODES = {"full", "alert_only"}
+MODES = {"full", "price", "alert_only"}
 
 
 def as_timestamp(value: str) -> datetime:
@@ -153,7 +153,7 @@ def drop_events(latest_time: datetime, current: list[dict],
     """Only alert when the approx-24h drop FIRST crosses the threshold.
 
     In the six intermediate collection runs this avoids repeating the same
-    -5% warning every 3 hours. Regular full reports still show all drops.
+    -5% warning every hour. Regular full reports still show all drops.
     """
     events = []
     for row in sorted(current, key=lambda r: (int(r["level"]), r["kind"])):
@@ -227,8 +227,64 @@ def format_payload(latest_time: datetime, current: list[dict],
     }
 
 
+
+def format_price_payload(latest_time: datetime, current: list[dict],
+                         previous: dict[tuple[str, str], dict],
+                         by_gem: dict, threshold: float = 5.0) -> dict:
+    """Compact hourly price update (22 hours per day).
+
+    The 09:17/21:17 runs use the full report instead to avoid duplicate
+    notifications. Price, listing counts and previous-snapshot changes are
+    included for every gem; the warning is added only on a NEW 24h threshold
+    crossing.
+    """
+    fields = []
+    for row in sorted(current, key=lambda r: (int(r["level"]), 0 if r["kind"] == "겁화" else 1)):
+        key = (row["level"], row["kind"])
+        old = previous.get(key, {})
+        price = valid_price(row.get("min_buy_gold"))
+        change = percent_change(price, old.get("min_buy_gold"))
+        change_text = f"{change:+.2f}%" if change is not None else "비교자료 없음"
+        count = int(row["total_listings"])
+        count_change = (
+            f"{count - int(old['total_listings']):+,}건"
+            if old and old.get("total_listings") not in (None, "")
+            else "비교자료 없음"
+        )
+        fields.append({
+            "name": f"{row['level']}레벨 {row['kind']}",
+            "value": (
+                f"최저 **{gold_text(price) if price is not None else '매물 없음'}** (직전 {change_text})\n"
+                f"등록 **{count:,}건** (직전 {count_change})"
+            ),
+            "inline": True,
+        })
+
+    events = drop_events(latest_time, current, previous, by_gem, threshold)
+    warnings = [
+        f"{e['row']['level']}{'겁' if e['row']['kind'] == '겁화' else '작'} "
+        f"{e['pct']:+.2f}%" for e in events
+    ]
+    content = ("🚨 **24시간 급락 신규 감지:** " + ", ".join(warnings)) if warnings else ""
+    return {
+        "username": "로아 보석 시세",
+        "allowed_mentions": {"parse": []},
+        **({"content": content} if content else {}),
+        "embeds": [{
+            "title": "로스트아크 4티어 보석 · 1시간 가격 알림",
+            "description": (
+                f"수집: **{latest_time:%Y-%m-%d %H:%M} KST**\n"
+                f"직전 수집 대비 변화 · 약 24시간 -{threshold:g}% 신규 급락만 강조\n"
+                f"[GitHub 최신 보고서]({REPORT_URL})"
+            ),
+            "fields": fields,
+            "footer": {"text": "최저 호가와 현재 등록 건수 기준, 거래 체결가격·거래량 아님"},
+        }],
+    }
+
+
 def format_alert_payload(latest_time: datetime, events: list[dict], threshold: float) -> dict:
-    """Send only *new* 24h drop events in intermediate 3-hour runs."""
+    """Send only *new* 24h drop events in non-full hourly runs."""
     lines = []
     for event in events:
         row, baseline, pct = event["row"], event["baseline"], event["pct"]
@@ -282,7 +338,7 @@ def now_kst() -> datetime:
 def main() -> None:
     mode = os.getenv("DISCORD_REPORT_MODE", "full").strip().lower()
     if mode not in MODES:
-        raise ValueError("DISCORD_REPORT_MODE는 full 또는 alert_only여야 해.")
+        raise ValueError("DISCORD_REPORT_MODE는 full, price, alert_only 중 하나여야 해.")
     latest_time, current, previous, by_gem = load_data(CSV_PATH)
     age_seconds = (now_kst() - latest_time).total_seconds()
     # After the original stop date, do not report a stale snapshot.
@@ -292,6 +348,8 @@ def main() -> None:
     threshold = get_threshold()
     if mode == "full":
         payload = format_payload(latest_time, current, previous, by_gem, threshold)
+    elif mode == "price":
+        payload = format_price_payload(latest_time, current, previous, by_gem, threshold)
     else:
         events = drop_events(latest_time, current, previous, by_gem, threshold)
         if not events:
